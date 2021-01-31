@@ -1,0 +1,105 @@
+//Baris KESKIN 170517040 ON-OFF CONTROL USE HYSTERESIS
+#define setpointPOT A0
+#define hyteresisPOT A1
+#define LDRokunandegerPOT A2
+#define LED 3
+int setpoint;
+int hyteresis;
+int ilkdeger;
+int LDRokunandeger;
+int hyteresisLOW;
+int hyteresisHIGH;
+int filtersetpoint;
+int filterhyteresis;
+int timer = 0;
+float kalman_new1;
+float kalman_old1;
+float cov_new1;
+float cov_old1;
+float kalman_gain1;
+float kalman_calculated1;
+float kalman_new2;
+float kalman_old2;
+float cov_new2;
+float cov_old2;
+float kalman_gain2;
+float kalman_calculated2;
+void setup() {
+  Serial.begin(9600);
+  pinMode(LED, OUTPUT);
+}
+
+void loop() {
+
+  AnalogREAD();//AnalogREAD adinda fonksiyon olusturuldu main'e cagirildi
+  filtersetpoint = kalman_filter1 (setpoint); // setpointin filtrelenmis hali
+  filterhyteresis = kalman_filter2 (hyteresis); // hyteresis bolgenin filtrelenmis hali
+  
+  hyteresisLOW = filtersetpoint - filterhyteresis; //histeresiz bolgesinin filtrelenmis alt siniri
+  hyteresisHIGH = filtersetpoint + filterhyteresis; //histeresiz bolgesinin filtrelenmis ust siniri
+  SerialPrint(); // Ciktilar icin fonksiyon olusuturuldu
+  
+  if (LDRokunandeger <= hyteresisLOW) {
+    digitalWrite(LED, HIGH);
+  }
+  
+  if (LDRokunandeger >= hyteresisHIGH) {
+    digitalWrite(LED, LOW);
+  }
+
+}
+///////////////////////////////////////////////////////////////////////////*************************************************///////////////////////////////////////////////////////////////////////////////
+//Ciktilari elde etmek icin olusturulmustur
+void SerialPrint() {
+  Serial.print(filtersetpoint); //Set point ciktisini plotta cizdirir
+  Serial.print(" ");
+  Serial.print(hyteresisLOW);//hyteresisLOW ciktisini plotta cizdirir
+  Serial.print(" "); 
+  Serial.print(hyteresisHIGH);  //hyteresisHIGH ciktisini plotta cizdirir
+  Serial.print(" ");
+  Serial.println(LDRokunandeger); //LDRokunandeger ciktisini plotta cizdirir
+}
+///////////////////////////////////////////////////////////////////////////*************************************************///////////////////////////////////////////////////////////////////////////////
+//Analog degerler sirayla okunur
+void AnalogREAD() {
+  setpoint = analogRead(setpointPOT); //Set noktasi icin A0'dan analog deger okunuyor
+  setpoint = map(setpoint, 0, 1023, 0, 255); //Set noktasi 0,1024 degerleri arasi yerine 0,255 degerleri arasinda okunacak
+  hyteresis = analogRead(hyteresisPOT); // Histeresiz araligi icin A1'den deger okunuyor
+  hyteresis = map(hyteresis, 0, 1023, 0, 63); //Histeresiz araligi 0,1024 degerleri arasi yerine 0,63 degerleri arasinda okunacak
+  LDRokunandeger = analogRead(LDRokunandegerPOT); //LDR'nin analog degerleri A2' den okunuyor
+  LDRokunandeger = map(LDRokunandeger, 0, 1023, 0, 255); //LDR'nin analog degerleri 0,1024 degerleri arasi yerine 0,255 degerleri arasinda okunacak
+}
+///////////////////////////////////////////////////////////////////////////*************************************************///////////////////////////////////////////////////////////////////////////////
+//elde edilen analog degerleri filtreden gecirerek potlarda olusan gurultuler indirgenir. (Kullanılmasada olur, plotta daha düzgün grafik elde edilir)
+float kalman_filter1 (float input1)
+{
+    
+   kalman_new1 = kalman_old1; // eski değer alınır
+   cov_new1 = cov_old1 + 0.50; //yeni kovaryans değeri belirlenir. Q=0.50 alınmıştır
+  
+   kalman_gain1 = cov_new1 / (cov_new1 + 0.9); //kalman kazancı hesaplanır. R=0.9 alınmıştır
+   kalman_calculated1 = kalman_new1 + (kalman_gain1 * (input1 - kalman_new1)); //kalman değeri hesaplanır
+  
+  cov_new1 = (1 - kalman_gain1) * cov_old1; //yeni kovaryans değeri hesaplanır
+  cov_old1 = cov_new1; //yeni değerler bir sonraki döngüde kullanılmak üzere kaydedilir
+  
+  kalman_old1 = kalman_calculated1;
+
+  return kalman_calculated1; //hesaplanan kalman değeri çıktı olarak verilir
+}
+float kalman_filter2 (float input2)
+{
+    
+   kalman_new2 = kalman_old2; // eski değer alınır
+   cov_new2 = cov_old2 + 0.50; //yeni kovaryans değeri belirlenir. Q=0.50 alınmıştır
+  
+   kalman_gain2 = cov_new2 / (cov_new2 + 0.9); //kalman kazancı hesaplanır. R=0.9 alınmıştır
+   kalman_calculated2 = kalman_new2 + (kalman_gain2 * (input2 - kalman_new2)); //kalman değeri hesaplanır
+  
+  cov_new2 = (1 - kalman_gain2) * cov_old2; //yeni kovaryans değeri hesaplanır
+  cov_old2 = cov_new2; //yeni değerler bir sonraki döngüde kullanılmak üzere kaydedilir
+  
+  kalman_old2 = kalman_calculated2;
+
+  return kalman_calculated2; //hesaplanan kalman değeri çıktı olarak verilir
+}

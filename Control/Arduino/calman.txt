@@ -1,0 +1,140 @@
+/*
+
+   Arduino pin    |   MPU6050
+   5V             |   Vcc
+   GND            |   GND
+   A4             |   SDA
+   A5             |   SCL
+
+   Bu programda Arduino'ya bağlanan MPU6050 ivme-gyro sensör kartından verilerin okunması gerçekleştirilmektedir.
+   I2C protokolü üzerinden veri ileten sensör kartı için gerekli kod düzenlemeleri yapıldıktan sonra 1 saniye arayla
+   ilgili kütüphane sayesinde ilgili fonksiyonlarla çeşitli veriler X, Y, Z eksenlerinden okunmaktadır.
+   Program boyunca her satırda ilgili açıklama satırı mevcuttur.
+
+ */
+ 
+#include <MPU6050_tockn.h> // MPU6050 için gerekli kütüphane
+#include <Wire.h>          // I2C için gerekli kütüphane
+
+MPU6050 mpu6050(Wire);     // MPU6050 nesnesini I2C haberleşme için tanımlıyoruz.
+const float CONST_G = 9.81;
+long timer = 0;
+float x_axis_ivme=0;
+float y_axis_ivme=0;
+float z_axis_ivme=0;
+float kalman_new1;
+float kalman_old1;
+float cov_new1;
+float cov_old1;
+float kalman_gain1;
+float kalman_calculated1;
+float kalman_new2;
+float kalman_old2;
+float cov_new2;
+float cov_old2;
+float kalman_gain2;
+float kalman_calculated2;
+float kalman_new3;
+float kalman_old3;
+float cov_new3;
+float cov_old3;
+float kalman_gain3;
+float kalman_calculated3;
+
+float kalman_filter1 (float input1)
+{
+    
+   kalman_new1 = kalman_old1; // eski değer alınır
+   cov_new1 = cov_old1 + 0.50; //yeni kovaryans değeri belirlenir. Q=0.50 alınmıştır
+  
+   kalman_gain1 = cov_new1 / (cov_new3 + 0.9); //kalman kazancı hesaplanır. R=0.9 alınmıştır
+   kalman_calculated1 = kalman_new1 + (kalman_gain1 * (input1 - kalman_new1)); //kalman değeri hesaplanır
+  
+  cov_new1 = (1 - kalman_gain1) * cov_old1; //yeni kovaryans değeri hesaplanır
+  cov_old1 = cov_new1; //yeni değerler bir sonraki döngüde kullanılmak üzere kaydedilir
+  
+  kalman_old1 = kalman_calculated1;
+
+  return kalman_calculated1; //hesaplanan kalman değeri çıktı olarak verilir
+}
+float kalman_filter2 (float input2)
+{
+    
+   kalman_new2 = kalman_old2; // eski değer alınır
+   cov_new2 = cov_old2 + 0.50; //yeni kovaryans değeri belirlenir. Q=0.50 alınmıştır
+  
+   kalman_gain2 = cov_new2 / (cov_new2 + 0.9); //kalman kazancı hesaplanır. R=0.9 alınmıştır
+   kalman_calculated2 = kalman_new2 + (kalman_gain2 * (input2 - kalman_new2)); //kalman değeri hesaplanır
+  
+  cov_new2 = (1 - kalman_gain2) * cov_old2; //yeni kovaryans değeri hesaplanır
+  cov_old2 = cov_new2; //yeni değerler bir sonraki döngüde kullanılmak üzere kaydedilir
+  
+  kalman_old2 = kalman_calculated2;
+
+  return kalman_calculated2; //hesaplanan kalman değeri çıktı olarak verilir
+}
+float kalman_filter3 (float input3)
+{
+    
+   kalman_new3 = kalman_old3; // eski değer alınır
+   cov_new3 = cov_old3 + 0.50; //yeni kovaryans değeri belirlenir. Q=0.50 alınmıştır
+  
+   kalman_gain3 = cov_new3 / (cov_new3 + 0.9); //kalman kazancı hesaplanır. R=0.9 alınmıştır
+   kalman_calculated3 = kalman_new3 + (kalman_gain3 * (input3 - kalman_new3)); //kalman değeri hesaplanır
+  
+  cov_new3 = (1 - kalman_gain3) * cov_old3; //yeni kovaryans değeri hesaplanır
+  cov_old3 = cov_new3; //yeni değerler bir sonraki döngüde kullanılmak üzere kaydedilir
+  
+  kalman_old3 = kalman_calculated3;
+
+  return kalman_calculated3; //hesaplanan kalman değeri çıktı olarak verilir
+}
+void setup() {
+  Serial.begin(9600);     // serial monitor ile haberleşme 9600 baudrate ile başlatılıyor.
+  Wire.begin();           // I2C haberleşme wire kütüphanesi ile başlatılıyor.
+  mpu6050.begin();        // MPU6050 ile haberleşme başlatılıyor.
+  mpu6050.calcGyroOffsets(true); // Sensorün başlangıçtaki konumu sıfır(0) olarak kabul ediliyor. 
+}                                // Bunun için bu fonksiyon ile offset değerleri hesaplanıyor.
+
+void loop() {
+  mpu6050.update();             // MPU6050'den alınan veriler sürekli güncelleniyor.
+
+  if(millis() - timer > 1000){  // Saniyede 1 kere (1 Hz) veri yazdırılması için o anki ms cinsinden süreden 1000 ms çıkarılıyor.
+                                // Bu sırada if döngüsünün dışında veriler sürekli güncel tutularak döngüye girildiğinde
+                                // verileri okuma sebebiyle oluşacak gecikmeler önlenmiş oluyor.
+    Serial.println("=======================================================");
+    Serial.print("temp : ");Serial.println(mpu6050.getTemp());    // Sensör kartı üzerindeki sıcaklık sensöründen bir sıcaklık değeri almak mümkün 
+                                                                  //fakat kartın kendi sıcaklığı da bu değeri değiştirdiğinden ortam sıcaklığı ölçümü için uygun değil.
+    timer = millis(); // millis() fonksiyonu ile Arduino'ya güç verildikten sonra geçen süre ms cinsinden elde edilebilir.                                                              
+    Serial.println("=======================================================\n");
+    } // if sonu
+    x_axis_ivme=kalman_filter1 (mpu6050.getAccX())*CONST_G;
+    y_axis_ivme=kalman_filter2 (mpu6050.getAccY())*CONST_G;
+    z_axis_ivme=kalman_filter3 (mpu6050.getAccZ())*CONST_G;
+    Serial.print("accX : ");Serial.print(x_axis_ivme);
+    Serial.print("accY : ");Serial.print(y_axis_ivme);
+    Serial.print("accZ : ");Serial.println(z_axis_ivme);
+    //Serial.print("accX : ");Serial.print(mpu6050.getAccX());      // X eksenindeki ivme verisi (acceleration on X-axis)
+    //Serial.print("\taccY : ");Serial.print(mpu6050.getAccY());    // Y eksenindeki ivme verisi (acceleration on Y-axis)
+    //Serial.print("\taccZ : ");Serial.println(mpu6050.getAccZ());  // Z eksenindeki ivme verisi (acceleration on Z-axis)
+  
+    //Serial.print("gyroX : ");Serial.print(mpu6050.getGyroX());      // X eksenindeki gyro verisi
+    //Serial.print("\tgyroY : ");Serial.print(mpu6050.getGyroY());    // Y eksenindeki gyro verisi
+    //Serial.print("\tgyroZ : ");Serial.println(mpu6050.getGyroZ());  // Z eksenindeki gyro verisi
+  
+    //Serial.print("accAngleX : ");Serial.print(mpu6050.getAccAngleX());      // X eksenindeki açısal ivme verisi
+    //Serial.print("\taccAngleY : ");Serial.println(mpu6050.getAccAngleY());  // Y eksenindeki açısal ivme verisi
+  
+    //Serial.print("gyroAngleX : ");Serial.print(mpu6050.getGyroAngleX());      // X eksenindeki gyro açı verisi
+    //Serial.print("\tgyroAngleY : ");Serial.print(mpu6050.getGyroAngleY());    // Y eksenindeki gyro açı verisi
+    //Serial.print("\tgyroAngleZ : ");Serial.println(mpu6050.getGyroAngleZ());  // Z eksenindeki gyro açı verisi
+    
+    //Serial.print("angleX : ");Serial.print(mpu6050.getAngleX());      // X eksenindeki açı verisi
+    //Serial.print("\tangleY : ");Serial.print(mpu6050.getAngleY());    // Y eksenindeki açı verisi
+    //Serial.print("\tangleZ : ");Serial.println(mpu6050.getAngleZ());  // Z eksenindeki açı verisi
+    
+    
+    
+  
+
+}   // void loop() sonu

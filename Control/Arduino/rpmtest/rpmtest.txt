@@ -1,0 +1,64 @@
+#include <Servo.h>
+
+Servo myservo;
+
+int in = 10;
+int servopin = 9;
+int saniye=0;
+//Variables
+unsigned long duration = 0;
+float rpm = 0;
+float rpm_a = 0;
+int counter = 0;
+int present = 0;
+int previous = 0;
+unsigned long elapsed = 0;
+unsigned long elapsed_prev = 0;
+
+
+
+void setup() {
+  // put your setup code here, to run once:
+Serial.begin(9600);
+  pinMode(in,INPUT);
+  elapsed = micros();
+  myservo.attach(9);
+}
+
+void loop() {  
+  saniye = (millis()/1000)%4;
+if(saniye>0 && saniye<=1)
+{
+myservo.write(180);
+}
+else if(saniye>1 && saniye<=2)
+{
+myservo.write(90);
+}
+  // put your main code here, to run repeatedly:
+ if (digitalRead(in) == 1 && previous == 0)
+  {
+    previous = 1;
+    duration = elapsed - elapsed_prev;
+    elapsed_prev  = micros();
+  }
+  if (digitalRead(in) == 1 && previous == 1)
+  {
+    previous = 1;
+  }
+  if (digitalRead(in) == 0 && previous == 1)
+  {
+    previous = 0;
+  }
+  if (digitalRead(in) == 0 && previous == 0)
+  {
+    previous = 0;
+    elapsed = micros();
+  }
+  rpm = 60000000/duration;
+
+
+
+
+ Serial.println(rpm);
+}

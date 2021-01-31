@@ -1,0 +1,555 @@
+#include <Wire.h>
+#define ADDRESS_SENSOR 0x77                 // Addresse du capteur
+// MTK3339 sürücüsü kullanan Adafruit GPS modülleri için test kodu
+//
+// Bu kod, bir kesintide GPS modülünün nasıl dinleneceğini gösterir
+// Bu da programın daha fazla 'özgürlüğe' sahip olmasını sağlar - 
+// Sadece yeni bir NMEA cümlesi olduğunda ayrıştırın! Ardından istendiğinde verilere erişin.
+// Adafruit Ultimate GPS modülü ile test edildi ve harika çalışıyor
+
+#include <Adafruit_GPS.h>
+#include <SoftwareSerial.h>
+
+// Bir GPS modülü kullanıyorsanız:
+// GPS Güç pimini 5V'ye bağlayın
+// GPS Topraklama pimini toprağa bağlayın
+// Yazılım seri kullanıyorsanız (sketch varsayılan örnek):
+//   GPS TX (iletim) pimini Digital 3'e bağlayın
+//   GPS RX (alma) pimini Dijital 2'ye bağlayın
+// Donanım seri kullanıyorsanız (örn. Arduino Uno):
+//   GPS TX (iletim) pimini Arduino RX1, RX2 veya RX3'e bağlayın
+//   GPS RX (alma) pimini eşleşen TX1, TX2 veya TX3'e bağlayın
+
+// Adafruit GPS Shield kullanıyorsanız, 
+// SoftwareSerial mySerial(3, 2); -> SoftwareSerial mySerial(8, 7);
+// ve anahtarın SoftSerial olarak ayarlandığından emin olun
+
+// Yazılım seri kullanıyorsanız, bu satırı etkin tutun
+
+// (pim numaralarını kablo tesisatınıza uyacak şekilde değiştirebilirsiniz):
+
+
+SoftwareSerial mySerial(5, 4);
+
+//  Donanım seri kullanıyorsanız (örn. Arduino Uno), yukarıdaki SoftwareSerial hattına yorum yapın ve bunun yerine bu satırı etkinleştirin 
+//  (Seri numarasını kablo tesisatınıza uyacak şekilde değiştirebilirsiniz):
+//HardwareSerial mySerial = Serial1;
+
+
+Adafruit_GPS GPS(&mySerial);
+
+
+// GPS verilerinin Seri konsola yansıtılmasını kapatmak için GPSECHO'yu 'false' olarak ayarlayın
+// Ham GPS cümlelerdeki hataları ayıklamak ve dinlemek istiyorsanız 'true' olarak ayarlayın. 
+#define GPSECHO  true
+
+// Bu kesmeyi kullanıp kullanmadığımızı izler
+// Varsayılan olarak kapalı!
+boolean usingInterrupt = false;
+void useInterrupt(boolean); // Func prototip Arduino 0023'ü mutlu ediyor
+
+int16_t  ac1, ac2, ac3, b1, b2, mb, mc, md; // BMP180'den sensör PROM değerlerini saklayın
+uint16_t ac4, ac5, ac6;                     // BMP180'den sensör PROM değerlerini saklayın
+// Ultra Low Power       OSS = 0, OSD =  5ms
+// Standard              OSS = 1, OSD =  8ms
+// High                  OSS = 2, OSD = 14ms
+// Ultra High Resolution OSS = 3, OSD = 26ms
+const uint8_t oss = 3;                      // Karşılık gelen aşırı örnekleme gecikmesi ile
+const uint8_t osd = 26;                     // aşırı örnekleme ayarını yapma 
+
+
+float T, P;                                 // Variables globales pour la température et la pression
+const int MPU1=0x68;
+int16_t AcX1,AcY1,AcZ1,Tmp1,GyX1,GyY1,GyZ1;
+
+
+ 
+//-------------------------------------------------\setup loop\------------------------------------------------------------ 
+ void setup(){ 
+      Serial.begin(115200);
+      Serial.println("Adafruit GPS library basic test!");
+      // connect at 115200 so we can read the GPS fast enough and echo without dropping chars
+      // also spit it out
+      // 9600 NMEA is the default baud rate for Adafruit MTK GPS's- some use 4800
+      GPS.begin(9600);
+  
+      // uncomment this line to turn on RMC (recommended minimum) and GGA (fix data) including altitude
+      GPS.sendCommand(PMTK_SET_NMEA_OUTPUT_RMCGGA);
+      // uncomment this line to turn on only the "minimum recommended" data
+      //GPS.sendCommand(PMTK_SET_NMEA_OUTPUT_RMCONLY);
+      // For parsing data, we don't suggest using anything but either RMC only or RMC+GGA since
+      // the parser doesn't care about other sentences at this time
+  
+      // Set the update rate
+      GPS.sendCommand(PMTK_SET_NMEA_UPDATE_1HZ);   // 1 Hz update rate
+      // For the parsing code to work nicely and have time to sort thru the data, and
+      // print it out we don't suggest using anything higher than 1 Hz
+
+      // Request updates on antenna status, comment out to keep quiet
+      GPS.sendCommand(PGCMD_ANTENNA);
+
+      // the nice thing about this code is you can have a timer0 interrupt go off
+      // every 1 millisecond, and read data from the GPS for you. that makes the
+      // loop code a heck of a lot easier!
+      useInterrupt(true);
+
+      delay(100);
+      // Ask for firmware version
+      mySerial.println(PMTK_Q_RELEASE);
+      Wire.begin(); 
+      Wire.beginTransmission(MPU1);
+      Wire.write(0x6B);// PWR_MGMT_1 register 
+      Wire.write(0); // set to zero (wakes up the MPU-6050)
+      Wire.endTransmission(true);Wire.begin();                      
+      while(!Serial){;}                         // On attend que le port série soit disponible
+      delay(3000);
+      init_SENSOR();                          // Initialise les variables
+      delay(100);       
+     } 
+      // Interrupt is called once a millisecond, looks for any new GPS data, and stores it
+SIGNAL(TIMER0_COMPA_vect) {
+      
+  char c = GPS.read();
+  // if you want to debug, this is a good time to do it!
+  #ifdef UDR0
+  if (GPSECHO)
+  if (c) UDR0 = c;  
+  // writing direct to UDR0 is much much faster than Serial.print 
+  // but only one character can be written at a time. 
+  #endif
+}
+
+void useInterrupt(boolean v) {
+  if (v) {
+    // Timer0 is already used for millis() - we'll just interrupt somewhere
+    // in the middle and call the "Compare A" function above
+    OCR0A = 0xAF;
+    TIMSK0 |= _BV(OCIE0A);
+    usingInterrupt = true;
+  } else {
+    // do not call the interrupt function COMPA anymore
+    TIMSK0 &= ~_BV(OCIE0A);
+    usingInterrupt = false;
+  }
+}
+uint32_t timer = millis();
+     
+//---------------------------------------------------\void loop\------------------------------------------------------------
+ void loop(){       // run over and over again
+      // in case you are not using the interrupt above, you'll
+      // need to 'hand query' the GPS, not suggested :(
+      if (! usingInterrupt) {
+      // read data from the GPS in the 'main loop'
+      char c = GPS.read();
+      // if you want to debug, this is a good time to do it!
+      if (GPSECHO)
+      if (c) Serial.print(c);
+      //get values for first mpu having address of 0x68   
+      GetMpuValue1(MPU1);
+      Serial.print("//---------------------------------&$$&---------------------------------\\");
+      int32_t b5;
+ 
+      b5 = temperature();                       // Lit et calcule la température (T) 
+
+      Serial.print("Temperature: ");
+      Serial.print(T, 2);
+      Serial.print("*C, ");
+
+      P = pressure(b5);                         // Lit et calcule la pressure (P) 
+
+      Serial.print("Pression: ");
+      Serial.print(P, 2);
+      Serial.print(" mbar, ");
+      Serial.print(P * 0.75006375541921, 2);
+      Serial.println(" mmHg");
+      Serial.println("");
+
+      delay(1000);                               // Delai entre chaque mesure
+ }
+ 
+//----------------------------------------------\user defined functions\-------------------------------------------------- 
+/**********************************************
+  Initialise les variables du capteur
+ **********************************************/
+  // if a sentence is received, we can check the checksum, parse it...
+  if (GPS.newNMEAreceived()) {
+    // a tricky thing here is if we print the NMEA sentence, or data
+    // we end up not listening and catching other sentences! 
+    // so be very wary if using OUTPUT_ALLDATA and trytng to print out data
+    //Serial.println(GPS.lastNMEA());   // this also sets the newNMEAreceived() flag to false
+  
+    if (!GPS.parse(GPS.lastNMEA()))   // this also sets the newNMEAreceived() flag to false
+      return;  // we can fail to parse a sentence in which case we should just wait for another
+  }
+
+  // if millis() or timer wraps around, we'll just reset it
+  if (timer > millis())  timer = millis();
+
+  // approximately every 2 seconds or so, print out the current stats
+  if (millis() - timer > 2000) { 
+    timer = millis(); // reset the timer
+    
+    Serial.print("\nTime: ");
+    Serial.print(GPS.hour, DEC); Serial.print(':');
+    Serial.print(GPS.minute, DEC); Serial.print(':');
+    Serial.print(GPS.seconds, DEC); Serial.print('.');
+    Serial.println(GPS.milliseconds);
+    Serial.print("Date: ");
+    Serial.print(GPS.day, DEC); Serial.print('/');
+    Serial.print(GPS.month, DEC); Serial.print("/20");
+    Serial.println(GPS.year, DEC);
+    Serial.print("Fix: "); Serial.print((int)GPS.fix);
+    Serial.print(" quality: "); Serial.println((int)GPS.fixquality); 
+    if (GPS.fix) {
+      Serial.print("Location: ");
+      Serial.print(GPS.latitude, 6); Serial.print(GPS.lat);
+      Serial.print(", "); 
+      Serial.print(GPS.longitude, 6); Serial.println(GPS.lon);
+      Serial.print("Location (in degrees, works with Google Maps): ");
+      Serial.print(GPS.latitudeDegrees, 6);
+      Serial.print(", "); 
+      Serial.println(GPS.longitudeDegrees, 6);
+      
+      Serial.print("Speed (knots): "); Serial.println(GPS.speed);
+      Serial.print("Angle: "); Serial.println(GPS.angle);
+      Serial.print("Altitude: "); Serial.println(GPS.altitude);
+      Serial.print("Satellites: "); Serial.println((int)GPS.satellites);
+    }
+  }
+}
+void init_SENSOR()
+{
+  ac1 = read_2_bytes(0xAA);
+  ac2 = read_2_bytes(0xAC);
+  ac3 = read_2_bytes(0xAE);
+  ac4 = read_2_bytes(0xB0);
+  ac5 = read_2_bytes(0xB2);
+  ac6 = read_2_bytes(0xB4);
+  b1  = read_2_bytes(0xB6);
+  b2  = read_2_bytes(0xB8);
+  mb  = read_2_bytes(0xBA);
+  mc  = read_2_bytes(0xBC);
+  md  = read_2_bytes(0xBE);
+
+  Serial.println("");
+  Serial.println("Données de calibration du capteur :");
+  Serial.print(F("AC1 = ")); Serial.println(ac1);
+  Serial.print(F("AC2 = ")); Serial.println(ac2);
+  Serial.print(F("AC3 = ")); Serial.println(ac3);
+  Serial.print(F("AC4 = ")); Serial.println(ac4);
+  Serial.print(F("AC5 = ")); Serial.println(ac5);
+  Serial.print(F("AC6 = ")); Serial.println(ac6);
+  Serial.print(F("B1 = "));  Serial.println(b1);
+  Serial.print(F("B2 = "));  Serial.println(b2);
+  Serial.print(F("MB = "));  Serial.println(mb);
+  Serial.print(F("MC = "));  Serial.println(mc);
+  Serial.print(F("MD = "));  Serial.println(md);
+  Serial.println("");
+}
+
+/**********************************************
+  Calcul de la pressure
+ **********************************************/
+float pressure(int32_t b5)
+{
+  int32_t x1, x2, x3, b3, b6, p, UP;
+  uint32_t b4, b7; 
+
+  UP = read_pressure();                         // Lecture de la pression renvoyée par le capteur
+
+  b6 = b5 - 4000;
+  x1 = (b2 * (b6 * b6 >> 12)) >> 11; 
+  x2 = ac2 * b6 >> 11;
+  x3 = x1 + x2;
+  b3 = (((ac1 * 4 + x3) << oss) + 2) >> 2;
+  x1 = ac3 * b6 >> 13;
+  x2 = (b1 * (b6 * b6 >> 12)) >> 16;
+  x3 = ((x1 + x2) + 2) >> 2;
+  b4 = (ac4 * (uint32_t)(x3 + 32768)) >> 15;
+  b7 = ((uint32_t)UP - b3) * (50000 >> oss);
+  if(b7 < 0x80000000) { p = (b7 << 1) / b4; } else { p = (b7 / b4) << 1; } // ou p = b7 < 0x80000000 ? (b7 * 2) / b4 : (b7 / b4) * 2;
+  x1 = (p >> 8) * (p >> 8);
+  x1 = (x1 * 3038) >> 16;
+  x2 = (-7357 * p) >> 16;
+  return (p + ((x1 + x2 + 3791) >> 4)) / 100.0f; // Retourne la pression en mbar
+}
+
+/**********************************************
+  Lecture de la température (non compensée)
+ **********************************************/
+int32_t temperature()
+{
+  int32_t x1, x2, b5, UT;
+
+  Wire.beginTransmission(ADDRESS_SENSOR); // Début de transmission avec l'Arduino 
+  Wire.write(0xf4);                       // Envoi l'adresse de registre
+  Wire.write(0x2e);                       // Ecrit la donnée
+  Wire.endTransmission();                 // Fin de transmission
+  delay(5);                               
+  
+  UT = read_2_bytes(0xf6);                // Lecture de la valeur de la TEMPERATURE 
+
+  // Calcule la vrai température
+  x1 = (UT - (int32_t)ac6) * (int32_t)ac5 >> 15;
+  x2 = ((int32_t)mc << 11) / (x1 + (int32_t)md);
+  b5 = x1 + x2;
+  T  = (b5 + 8) >> 4;
+  T = T / 10.0;                           // Retourne la température in celsius 
+  return b5;  
+}
+
+/**********************************************
+  Lecture de la pression 
+ **********************************************/
+int32_t read_pressure()
+{
+  int32_t value; 
+  Wire.beginTransmission(ADDRESS_SENSOR);   // Début de transmission avec l'Arduino 
+  Wire.write(0xf4);                         // Envoi l'adresse de registre
+  Wire.write(0x34 + (oss << 6));            // Ecrit la donnée
+  Wire.endTransmission();                   // Fin de transmission
+  delay(osd);                               
+  Wire.beginTransmission(ADDRESS_SENSOR);
+  Wire.write(0xf6);                         
+  Wire.endTransmission();
+  Wire.requestFrom(ADDRESS_SENSOR, 3);      
+  if(Wire.available() >= 3)
+  {
+    value = (((int32_t)Wire.read() << 16) | ((int32_t)Wire.read() << 8) | ((int32_t)Wire.read())) >> (8 - oss);
+  }
+  return value;                             // Renvoie la valeur
+}
+
+/**********************************************
+  Lecture d'un byte sur la capteur BMP 
+ **********************************************/
+uint8_t read_1_byte(uint8_t code)
+{
+  uint8_t value;
+  Wire.beginTransmission(ADDRESS_SENSOR);         
+  Wire.write(code);                               
+  Wire.endTransmission();                         
+  Wire.requestFrom(ADDRESS_SENSOR, 1);            
+  if(Wire.available() >= 1)
+  {
+    value = Wire.read();                          
+  }
+  return value;                                   
+}
+
+/**********************************************
+  Lecture de 2 bytes sur la capteur BMP 
+ **********************************************/
+uint16_t read_2_bytes(uint8_t code)
+{
+  uint16_t value;
+  Wire.beginTransmission(ADDRESS_SENSOR);         
+  Wire.write(code);                               
+  Wire.endTransmission();                         
+  Wire.requestFrom(ADDRESS_SENSOR, 2);            
+  if(Wire.available() >= 2)
+  {
+    value = (Wire.read() << 8) | Wire.read();     // Récupère 2 bytes de données
+  }
+  return value;                                   // Renvoie la valeur
+}
+      
+ 
+ void GetMpuValue1(const int MPU){ 
+   
+      Wire.beginTransmission(MPU); 
+      Wire.write(0x3B); // starting with register 0x3B (ACCEL_XOUT_H) 
+      Wire.endTransmission(false);
+      Wire.requestFrom(MPU, 14, true); // request a total of 14 registers 
+      AcX1=Wire.read()<<8| Wire.read(); // 0x3B (ACCEL_XOUT_H) & 0x3C (ACCEL_XOUT_L) 
+      AcY1=Wire.read()<<8|  Wire.read(); // 0x3D (ACCEL_YOUT_H) & 0x3E (ACCEL_YOUT_L)
+      AcZ1=Wire.read()<<8| Wire.read(); // 0x3F (ACCEL_ZOUT_H) & 0x40 (ACCEL_ZOUT_L) 
+      Tmp1=Wire.read()<<8| Wire.read(); // 0x41 (TEMP_OUT_H) & 0x42 (TEMP_OUT_L) 
+      GyX1=Wire.read()<<8| Wire.read(); // 0x43 (GYRO_XOUT_H) & 0x44 (GYRO_XOUT_L) 
+      GyY1=Wire.read()<<8| Wire.read(); // 0x45 (GYRO_YOUT_H) & 0x46 (GYRO_YOUT_L) 
+      GyZ1=Wire.read()<<8| Wire.read(); // 0x47 (GYRO_ZOUT_H) & 0x48 (GYRO_ZOUT_L) 
+      Serial.print("AcX = ");
+      Serial.print(AcX1);
+      Serial.print(" | AcY = "); 
+      Serial.print(AcY1);
+      Serial.print(" | AcZ = ");
+      Serial.print(AcZ1); 
+      Serial.print(" | GyX = ");
+      Serial.print(GyX1); 
+      Serial.print(" | GyY = "); 
+      Serial.print(GyY1);
+      Serial.print(" | GyZ = ");
+      Serial.println(GyZ1); 
+     }
+
+/*void setup()
+{
+  Serial.begin(9600);                       
+  while(!Serial){;}                         // On attend que le port série soit disponible
+  delay(5000);
+  Wire.begin();                             // Active le bus I2C
+    init_SENSOR();                          // Initialise les variables
+  delay(100);
+}
+void loop()
+{
+  int32_t b5;
+ 
+  b5 = temperature();                       // Lit et calcule la température (T) 
+
+  Serial.print("Temperature: ");
+  Serial.print(T, 2);
+  Serial.print("*C, ");
+
+  P = pressure(b5);                         // Lit et calcule la pressure (P) 
+
+  Serial.print("Pression: ");
+  Serial.print(P, 2);
+  Serial.print(" mbar, ");
+  Serial.print(P * 0.75006375541921, 2);
+  Serial.println(" mmHg");
+  Serial.println("");
+
+  delay(1000);                               // Delai entre chaque mesure
+  
+}
+/**********************************************
+  Initialise les variables du capteur
+ **********************************************/
+/*void init_SENSOR()
+{
+  ac1 = read_2_bytes(0xAA);
+  ac2 = read_2_bytes(0xAC);
+  ac3 = read_2_bytes(0xAE);
+  ac4 = read_2_bytes(0xB0);
+  ac5 = read_2_bytes(0xB2);
+  ac6 = read_2_bytes(0xB4);
+  b1  = read_2_bytes(0xB6);
+  b2  = read_2_bytes(0xB8);
+  mb  = read_2_bytes(0xBA);
+  mc  = read_2_bytes(0xBC);
+  md  = read_2_bytes(0xBE);
+
+  Serial.println("");
+  Serial.println("Données de calibration du capteur :");
+  Serial.print(F("AC1 = ")); Serial.println(ac1);
+  Serial.print(F("AC2 = ")); Serial.println(ac2);
+  Serial.print(F("AC3 = ")); Serial.println(ac3);
+  Serial.print(F("AC4 = ")); Serial.println(ac4);
+  Serial.print(F("AC5 = ")); Serial.println(ac5);
+  Serial.print(F("AC6 = ")); Serial.println(ac6);
+  Serial.print(F("B1 = "));  Serial.println(b1);
+  Serial.print(F("B2 = "));  Serial.println(b2);
+  Serial.print(F("MB = "));  Serial.println(mb);
+  Serial.print(F("MC = "));  Serial.println(mc);
+  Serial.print(F("MD = "));  Serial.println(md);
+  Serial.println("");
+}
+
+/**********************************************
+  Calcul de la pressure
+ **********************************************/
+/*float pressure(int32_t b5)
+{
+  int32_t x1, x2, x3, b3, b6, p, UP;
+  uint32_t b4, b7; 
+
+  UP = read_pressure();                         // Lecture de la pression renvoyée par le capteur
+
+  b6 = b5 - 4000;
+  x1 = (b2 * (b6 * b6 >> 12)) >> 11; 
+  x2 = ac2 * b6 >> 11;
+  x3 = x1 + x2;
+  b3 = (((ac1 * 4 + x3) << oss) + 2) >> 2;
+  x1 = ac3 * b6 >> 13;
+  x2 = (b1 * (b6 * b6 >> 12)) >> 16;
+  x3 = ((x1 + x2) + 2) >> 2;
+  b4 = (ac4 * (uint32_t)(x3 + 32768)) >> 15;
+  b7 = ((uint32_t)UP - b3) * (50000 >> oss);
+  if(b7 < 0x80000000) { p = (b7 << 1) / b4; } else { p = (b7 / b4) << 1; } // ou p = b7 < 0x80000000 ? (b7 * 2) / b4 : (b7 / b4) * 2;
+  x1 = (p >> 8) * (p >> 8);
+  x1 = (x1 * 3038) >> 16;
+  x2 = (-7357 * p) >> 16;
+  return (p + ((x1 + x2 + 3791) >> 4)) / 100.0f; // Retourne la pression en mbar
+}
+
+/**********************************************
+  Lecture de la température (non compensée)
+ **********************************************/
+/*int32_t temperature()
+{
+  int32_t x1, x2, b5, UT;
+
+  Wire.beginTransmission(ADDRESS_SENSOR); // Début de transmission avec l'Arduino 
+  Wire.write(0xf4);                       // Envoi l'adresse de registre
+  Wire.write(0x2e);                       // Ecrit la donnée
+  Wire.endTransmission();                 // Fin de transmission
+  delay(5);                               
+  
+  UT = read_2_bytes(0xf6);                // Lecture de la valeur de la TEMPERATURE 
+
+  // Calcule la vrai température
+  x1 = (UT - (int32_t)ac6) * (int32_t)ac5 >> 15;
+  x2 = ((int32_t)mc << 11) / (x1 + (int32_t)md);
+  b5 = x1 + x2;
+  T  = (b5 + 8) >> 4;
+  T = T / 10.0;                           // Retourne la température in celsius 
+  return b5;  
+}
+
+/**********************************************
+  Lecture de la pression 
+ **********************************************/
+/*int32_t read_pressure()
+{
+  int32_t value; 
+  Wire.beginTransmission(ADDRESS_SENSOR);   // Début de transmission avec l'Arduino 
+  Wire.write(0xf4);                         // Envoi l'adresse de registre
+  Wire.write(0x34 + (oss << 6));            // Ecrit la donnée
+  Wire.endTransmission();                   // Fin de transmission
+  delay(osd);                               
+  Wire.beginTransmission(ADDRESS_SENSOR);
+  Wire.write(0xf6);                         
+  Wire.endTransmission();
+  Wire.requestFrom(ADDRESS_SENSOR, 3);      
+  if(Wire.available() >= 3)
+  {
+    value = (((int32_t)Wire.read() << 16) | ((int32_t)Wire.read() << 8) | ((int32_t)Wire.read())) >> (8 - oss);
+  }
+  return value;                             // Renvoie la valeur
+}
+
+/**********************************************
+  Lecture d'un byte sur la capteur BMP 
+ **********************************************/
+/*uint8_t read_1_byte(uint8_t code)
+{
+  uint8_t value;
+  Wire.beginTransmission(ADDRESS_SENSOR);         
+  Wire.write(code);                               
+  Wire.endTransmission();                         
+  Wire.requestFrom(ADDRESS_SENSOR, 1);            
+  if(Wire.available() >= 1)
+  {
+    value = Wire.read();                          
+  }
+  return value;                                   
+}
+
+/**********************************************
+  Lecture de 2 bytes sur la capteur BMP 
+ **********************************************/
+/*uint16_t read_2_bytes(uint8_t code)
+{
+  uint16_t value;
+  Wire.beginTransmission(ADDRESS_SENSOR);         
+  Wire.write(code);                               
+  Wire.endTransmission();                         
+  Wire.requestFrom(ADDRESS_SENSOR, 2);            
+  if(Wire.available() >= 2)
+  {
+    value = (Wire.read() << 8) | Wire.read();     // Récupère 2 bytes de données
+  }
+  return value;                                   // Renvoie la valeur
+}
+*/

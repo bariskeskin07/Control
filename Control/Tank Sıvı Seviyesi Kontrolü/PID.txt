@@ -1,0 +1,107 @@
+#include <stdio.h>
+#include <stdlib.h>
+#include <math.h>
+/*pid and plant constants can be changed in the respective functions, lines 58-62 and 82-84*/
+ 
+int simulate();
+double pid(double e);
+double plant(double c);
+ 
+int main(void)
+{
+    int n = simulate();
+ 
+    printf("simulated for %d steps\n", n);
+ 
+    return 0;
+}
+ 
+//run the closed-loop simulation
+int simulate()
+{
+    int BUF = 128;      //line buffer
+    char line[BUF];
+    int n = 0;
+ 
+    //open the setpointvalues.txt file and an output file to write to
+    FILE *in = fopen("setpointvalues.txt", "r");
+    FILE *out = fopen("out.txt", "w");
+    if (in == NULL) {
+        printf("unable to read setpointvalues.txt\n");
+        fclose(out);
+        return 0;
+    }
+    //read line by line and compute the controlled output
+    while (fgets(line, BUF, in)) {
+        double sp;
+        sscanf(line, "%lf", &sp);
+ 
+        static double y = 0;    //the plant output
+        double e = sp - y;  //negative feedback
+        double c = pid(e);  //compute control output
+        y = plant(c);   //compute plant output
+ 
+        fprintf(out, "%f\n", y);    //write to output file
+ 
+        n++;
+    }
+    printf("plant output written to out.txt\n");
+    fclose(in);
+    fclose(out);
+ 
+    return n;
+}
+ 
+//compute the controller output
+//in: current error e
+//return: control output c
+double pid(double e)
+{
+    const double kp = 4.0;
+    const double kd = 2.0;
+    const double ki = 0.5;
+    const double tf = 4.0;
+    const double h = 0.1;
+ 
+    static double ed = 0;   //e(k-1)
+    static double edd = 0;  //e(k-2)
+    static double cd = 0;   //c(k-1)
+    static double cdd = 0;  //c(k-2)
+ 
+    //differential equation for current c, derived from the given TF
+    double c =
+        (e *
+         (4 * kd + 4 * kp * tf + 2 * kp * h + 2 * ki * tf * h +
+          ki * h * h) + ed * (-8 * kd - 8 * kp * tf + 2 * ki * h * h) +
+         edd * (4 * kd + 4 * kp * tf - 2 * kp * h - 2 * ki * tf * h +
+            ki * h * h) - cdd * (4 * tf - 2 * h) +
+         cd * (8 * tf)) / (4 * tf + 2 * h);
+ 
+    edd = ed;
+    ed = e;
+    cdd = cd;
+    cd = c;
+ 
+    return c;
+}
+ 
+//compute the plant output
+//in: control output c
+//return: plant output y
+double plant(double c)
+{
+    const double k = 2.0;
+    const double t = 3.0;
+    const double h = 0.1;
+ 
+    static double cd = 0;   //c(k-1)
+    static double yd = 0;   //y(k-1)
+ 
+    //differential equation for current y, derived from the given TF
+    double y = exp(-(1 / t) * h) * yd + (k - k * exp(-(1 / t) * h)) * cd;
+ 
+    cd = c;
+    yd = y;
+ 
+    return y;
+}

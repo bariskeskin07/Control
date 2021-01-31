@@ -1,0 +1,63 @@
+/*
+
+   Arduino pin    |   MPU6050
+   5V             |   Vcc
+   GND            |   GND
+   A4             |   SDA
+   A5             |   SCL
+
+   Bu programda Arduino'ya bağlanan MPU6050 ivme-gyro sensör kartından verilerin okunması gerçekleştirilmektedir.
+   I2C protokolü üzerinden veri ileten sensör kartı için gerekli kod düzenlemeleri yapıldıktan sonra 1 saniye arayla
+   ilgili kütüphane sayesinde ilgili fonksiyonlarla çeşitli veriler X, Y, Z eksenlerinden okunmaktadır.
+   Program boyunca her satırda ilgili açıklama satırı mevcuttur.
+
+ */
+ 
+#include <MPU6050_tockn.h> // MPU6050 için gerekli kütüphane
+#include <Wire.h>          // I2C için gerekli kütüphane
+
+MPU6050 mpu6050(Wire);     // MPU6050 nesnesini I2C haberleşme için tanımlıyoruz.
+
+long timer = 0;
+
+void setup() {
+  Serial.begin(9600);     // serial monitor ile haberleşme 9600 baudrate ile başlatılıyor.
+  Wire.begin();           // I2C haberleşme wire kütüphanesi ile başlatılıyor.
+  mpu6050.begin();        // MPU6050 ile haberleşme başlatılıyor.
+  mpu6050.calcGyroOffsets(true); // Sensorün başlangıçtaki konumu sıfır(0) olarak kabul ediliyor. 
+}                                // Bunun için bu fonksiyon ile offset değerleri hesaplanıyor.
+
+void loop() {
+  mpu6050.update();             // MPU6050'den alınan veriler sürekli güncelleniyor.
+
+  //if(millis() - timer > 1000){  // Saniyede 1 kere (1 Hz) veri yazdırılması için o anki ms cinsinden süreden 1000 ms çıkarılıyor.
+                                // Bu sırada if döngüsünün dışında veriler sürekli güncel tutularak döngüye girildiğinde
+                                // verileri okuma sebebiyle oluşacak gecikmeler önlenmiş oluyor.
+    //Serial.println("=======================================================");
+    //Serial.print("temp : ");Serial.println(mpu6050.getTemp());    // Sensör kartı üzerindeki sıcaklık sensöründen bir sıcaklık değeri almak mümkün 
+                                                                  //fakat kartın kendi sıcaklığı da bu değeri değiştirdiğinden ortam sıcaklığı ölçümü için uygun değil.
+    
+    //Serial.print("accX : ");Serial.print(mpu6050.getAccX());      // X eksenindeki ivme verisi (acceleration on X-axis)
+    //Serial.print("\taccY : ");Serial.print(mpu6050.getAccY());    // Y eksenindeki ivme verisi (acceleration on Y-axis)
+    Serial.print("\taccZ : ");Serial.println(mpu6050.getAccZ());  // Z eksenindeki ivme verisi (acceleration on Z-axis)
+  
+    //Serial.print("gyroX : ");Serial.print(mpu6050.getGyroX());      // X eksenindeki gyro verisi
+    //Serial.print("\tgyroY : ");Serial.print(mpu6050.getGyroY());    // Y eksenindeki gyro verisi
+    //Serial.print("\tgyroZ : ");Serial.println(mpu6050.getGyroZ());  // Z eksenindeki gyro verisi
+  
+    //Serial.print("accAngleX : ");Serial.print(mpu6050.getAccAngleX());      // X eksenindeki açısal ivme verisi
+    //Serial.print("\taccAngleY : ");Serial.println(mpu6050.getAccAngleY());  // Y eksenindeki açısal ivme verisi
+  
+    //Serial.print("gyroAngleX : ");Serial.print(mpu6050.getGyroAngleX());      // X eksenindeki gyro açı verisi
+    //Serial.print("\tgyroAngleY : ");Serial.print(mpu6050.getGyroAngleY());    // Y eksenindeki gyro açı verisi
+    //Serial.print("\tgyroAngleZ : ");Serial.println(mpu6050.getGyroAngleZ());  // Z eksenindeki gyro açı verisi
+    
+    //Serial.print("angleX : ");Serial.print(mpu6050.getAngleX());      // X eksenindeki açı verisi
+    //Serial.print("\tangleY : ");Serial.print(mpu6050.getAngleY());    // Y eksenindeki açı verisi
+    //Serial.print("\tangleZ : ");Serial.println(mpu6050.getAngleZ());  // Z eksenindeki açı verisi
+    //Serial.println("=======================================================\n");
+    //timer = millis(); // millis() fonksiyonu ile Arduino'ya güç verildikten sonra geçen süre ms cinsinden elde edilebilir.
+    
+  //} // if sonu
+
+}   // void loop() sonu
